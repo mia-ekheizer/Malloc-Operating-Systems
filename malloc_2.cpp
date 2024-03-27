@@ -22,32 +22,25 @@ public:
     }
 
     void* insert(MallocMetadata* newMetadata) {
-    
-        if(!head) {
-            head = newMetadata;
-            num_allocated_blocks++;
-            num_allocated_bytes += newMetadata->size;
-            return newMetadata;
-        }
+        MallocMetadata dummy; //on the stack
+        dummy.next = head;
+        head = &dummy;
+        head->prev = &dummy;
         
         MallocMetadata* temp = head;
         if(num_free_blocks != 0) {
-            while(temp) {
+            while(temp->next) {
                 if (temp->is_free && temp->size >= newMetadata->size) {
                     temp->is_free = false;
                     num_free_blocks--;
                     num_allocated_blocks++; 
-                    num_allocated_bytes += temp ->size; // the size of the block that was allocated
+                    num_allocated_bytes += temp->size; // the size of the block that was allocated
                     num_free_bytes -= temp->size;
                     return temp;
                 }
                 temp = temp->next;
             } // no free blocks in the right size found:
         }     
-        temp = head;
-        while(temp->next) {
-            temp = temp->next;
-        }
         temp->next = newMetadata;
         newMetadata->prev = temp;
         newMetadata->next = nullptr;
