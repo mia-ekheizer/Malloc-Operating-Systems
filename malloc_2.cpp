@@ -1,3 +1,4 @@
+
 class MemoryList {
 private:
     typedef struct MallocMetadata {
@@ -5,25 +6,54 @@ private:
         bool is_free;
         MallocMetadata* next;
         MallocMetadata* prev;
-    }MallocMetadata;
-
+    } MallocMetadata;
+    
     MallocMetadata* head;
+    int num_free_blocks;
+    int num_free_bytes;
+    int num_allocated_blocks;
+    int num_allocated_bytes;
+    const int metadata_size = sizeof(MallocMetadata);
 
 public:
     MemoryList() {
         head = nullptr;
+        num_free_blocks = 0;
     }
-    void insert(MallocMetadata* metadata) {
+
+    void* insert(MallocMetadata* newMetadata) {
         if(!head) {
-            head = metadata;
+            head = newMetadata;
             return;
         }
         MallocMetadata* temp = head;
+        if(num_free_blocks != 0) {
+            while(temp->next) {
+                
+                if (temp->is_free && temp->size > newMetadata->size) {
+                    temp->is_free = false;
+                    num_free_blocks--;
+                    num_allocated_blocks++;
+                    // TODO: update all the other variables
+                }
+                temp = temp->next;
+            }
+            
+            if (temp->next == nullptr) {
+                temp->next = newMetadata;
+                newMetadata->prev = temp;
+                newMetadata->next = nullptr;
+                return;
+            }
+            
+        }
+        
         while(temp->next) {
             temp = temp->next;
         }
-        temp->next = metadata;
-        metadata->prev = temp;
+        temp->next = newMetadata;
+        newMetadata->prev = temp;
+        
     }
     void remove(MallocMetadata* metadata) {
         if(metadata == head) {
