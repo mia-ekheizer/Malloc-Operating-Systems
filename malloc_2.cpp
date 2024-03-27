@@ -47,14 +47,7 @@ public:
             num_allocated_blocks++;
             num_allocated_bytes += newMetadata->size;
             return;
-        }
-        
-        while(temp->next) {
-            temp = temp->next;
-        }
-        temp->next = newMetadata;
-        newMetadata->prev = temp;
-        
+        }     
     }
     void remove(MallocMetadata* metadata) {
         if(metadata == head) {
