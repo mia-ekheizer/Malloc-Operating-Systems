@@ -1,13 +1,14 @@
+#include <unistd.h>
 
 class MemoryList {
-private:
+public:
     typedef struct MallocMetadata {
         size_t size;
         bool is_free;
         MallocMetadata* next;
         MallocMetadata* prev;
     } MallocMetadata;
-    
+private:  
     MallocMetadata* head;
     MallocMetadata dummy;
     int num_free_blocks;
@@ -15,8 +16,7 @@ private:
     int num_allocated_blocks;
     int num_allocated_bytes;
     const int metadata_size = sizeof(MallocMetadata);
-
-public:
+    //private constructor
     MemoryList() {
         dummy.next = nullptr;
         dummy.prev = nullptr;
@@ -26,6 +26,13 @@ public:
         num_allocated_blocks = 0;
         num_allocated_bytes = 0;
     }
+
+public:
+     static MemoryList& getInstance() {
+        static MemoryList instance;
+        return instance;
+    }
+
     //for allocation usage
     void* insert(MallocMetadata* newMetadata) {
         MallocMetadata* temp = head;
@@ -60,49 +67,16 @@ public:
         num_free_bytes += toRemove->size;
         toRemove->is_free = true;
     }
-
-    void* smalloc(size_t size) {
-    
-    }
-    void* scalloc(size_t num, size_t size) {
-
-    }
-
-    void sfree(void* p) {
-
-    }
-
-    void* srealloc(void* oldp, size_t size) {
-
-    }
-
-    size_t _num_free_blocks() {
-
-    }
-
-    size_t _num_free_bytes() {
-
-    }
-
-    size_t _num_allocated_blocks() {
-
-    }
-
-    size_t _num_allocated_bytes() {
-    
-    }
-
-    size_t _num_meta_data_bytes() {
-    
-    }
-
-    size_t _size_meta_data() {
-
+    int getMetadataSize() {
+        return metadata_size;
     }
 };
 
 void* smalloc(size_t size) {
-    
+    MemoryList& memList = MemoryList::getInstance();
+    if(size == 0 || size > 1e8)
+        return nullptr;
+    MemoryList::MallocMetadata* newMetadata = reinterpret_cast<MemoryList::MallocMetadata*>(sbrk(size + memList.getMetadataSize()));
 }
 void* scalloc(size_t num, size_t size) {
 
