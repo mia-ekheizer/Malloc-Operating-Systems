@@ -9,6 +9,7 @@ private:
     } MallocMetadata;
     
     MallocMetadata* head;
+    MallocMetadata dummy;
     int num_free_blocks;
     int num_free_bytes;
     int num_allocated_blocks;
@@ -17,48 +18,47 @@ private:
 
 public:
     MemoryList() {
-        head = nullptr;
-        num_free_blocks = 0;
-    }
-
-    void* insert(MallocMetadata* newMetadata) {
-        MallocMetadata dummy; //on the stack
-        dummy.next = head;
+        dummy.next = nullptr;
+        dummy.prev = nullptr;
         head = &dummy;
-        head->prev = &dummy;
-        
+        num_free_blocks = 0;
+        num_free_bytes = 0;
+        num_allocated_blocks = 0;
+        num_allocated_bytes = 0;
+    }
+    //for allocation usage
+    void* insert(MallocMetadata* newMetadata) {
         MallocMetadata* temp = head;
-        if(num_free_blocks != 0) {
-            while(temp->next) {
-                if (temp->is_free && temp->size >= newMetadata->size) {
-                    temp->is_free = false;
-                    num_free_blocks--;
-                    num_allocated_blocks++; 
-                    num_allocated_bytes += temp->size; // the size of the block that was allocated
-                    num_free_bytes -= temp->size;
-                    return temp;
-                }
-                temp = temp->next;
-            } // no free blocks in the right size found:
-        }     
+        while(temp->next) {
+            if (temp->is_free && temp->size >= newMetadata->size) { //
+                temp->is_free = false;
+                num_free_blocks--;
+                num_allocated_blocks++; 
+                num_allocated_bytes += temp->size; // the size of the block that was allocated
+                num_free_bytes -= temp->size;
+                return temp;
+            }
+            temp = temp->next;
+        } // no free blocks in the right size found:
         temp->next = newMetadata;
         newMetadata->prev = temp;
         newMetadata->next = nullptr;
+        newMetadata->is_free = false;
         num_allocated_blocks++;
         num_allocated_bytes += newMetadata->size;
         return newMetadata;
     }
-    void remove(MallocMetadata* metadata) {
-        if(metadata == head) {
-            head = metadata->next;
+
+    //for free usage
+    void remove(MallocMetadata* toRemove) {
+        if(!toRemove || toRemove->is_free)
             return;
-        }
-        MallocMetadata* temp = head;
-        while(temp->next != metadata) {
-            temp = temp->next;
-        }
-        temp->next = metadata->next;
-        metadata->next->prev = temp;
+    
+        num_allocated_blocks--;
+        num_allocated_bytes -= toRemove->size;
+        num_free_blocks++;
+        num_free_bytes += toRemove->size;
+        toRemove->is_free = true;
     }
 
     void* smalloc(size_t size) {
