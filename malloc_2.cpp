@@ -8,6 +8,7 @@ public:
         MallocMetadata* next;
         MallocMetadata* prev;
     } MallocMetadata;
+
 private:  
     MallocMetadata dummy;
     int num_free_blocks;
@@ -15,6 +16,7 @@ private:
     int num_allocated_blocks;
     int num_allocated_bytes;
     const int metadata_size = sizeof(MallocMetadata);
+
     //private constructor
     MemoryList() {
         dummy.next = nullptr;
@@ -71,7 +73,6 @@ public:
     int getMetadataSize() {
         return metadata_size;
     }
-
 };
 
 void* smalloc(size_t size) {
@@ -85,6 +86,7 @@ void* smalloc(size_t size) {
 
     return memList.insert(newMetadata, size);
 }
+
 void* scalloc(size_t num, size_t size) {
     if (num == 0 || size == 0 || size * num > 1e8) 
         return nullptr;
