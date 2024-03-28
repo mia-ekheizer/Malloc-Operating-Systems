@@ -1,4 +1,3 @@
-#include <unistd.h>
 
 class MemoryList {
 public:
@@ -70,6 +69,13 @@ public:
     int getMetadataSize() {
         return metadata_size;
     }
+
+    void initializeMetadata(MallocMetadata* metadata, size_t size) {
+        metadata->size = size;
+        metadata->is_free = false;
+        metadata->next = nullptr;
+        metadata->prev = nullptr;
+    }
 };
 
 void* smalloc(size_t size) {
@@ -77,6 +83,10 @@ void* smalloc(size_t size) {
     if(size == 0 || size > 1e8)
         return nullptr;
     MemoryList::MallocMetadata* newMetadata = reinterpret_cast<MemoryList::MallocMetadata*>(sbrk(size + memList.getMetadataSize()));
+    if(!newMetadata)
+        return nullptr;
+    memList.initializeMetadata(newMetadata, size);
+    return memList.insert(newMetadata);
 }
 void* scalloc(size_t num, size_t size) {
 
