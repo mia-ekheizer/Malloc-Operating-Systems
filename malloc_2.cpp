@@ -9,7 +9,6 @@ public:
         MallocMetadata* prev;
     } MallocMetadata;
 private:  
-    MallocMetadata* head;
     MallocMetadata dummy;
     int num_free_blocks;
     int num_free_bytes;
@@ -20,7 +19,6 @@ private:
     MemoryList() {
         dummy.next = nullptr;
         dummy.prev = nullptr;
-        head = &dummy;
         num_free_blocks = 0;
         num_free_bytes = 0;
         num_allocated_blocks = 0;
@@ -28,22 +26,24 @@ private:
     }
 
 public:
-     static MemoryList& getInstance() {
+    // singleton
+    static MemoryList& getInstance() {
         static MemoryList instance;
         return instance;
     }
 
     //for allocation usage
-    void* insert(MallocMetadata* newMetadata) {
-        MallocMetadata* temp = head;
+    void* insert(MallocMetadata* newMetadata, size_t size) {
+        newMetadata->size = size;
+        MallocMetadata* temp = &dummy;
         while(temp->next) {
-            if (temp->is_free && temp->size >= newMetadata->size) { //
+            if (temp->is_free && temp->size >= newMetadata->size) {
                 temp->is_free = false;
                 num_free_blocks--;
                 num_allocated_blocks++; 
                 num_allocated_bytes += temp->size; // the size of the block that was allocated
                 num_free_bytes -= temp->size;
-                return temp;
+                return temp + metadata_size;
             }
             temp = temp->next;
         } // no free blocks in the right size found:
@@ -53,7 +53,7 @@ public:
         newMetadata->is_free = false;
         num_allocated_blocks++;
         num_allocated_bytes += newMetadata->size;
-        return newMetadata;
+        return newMetadata + metadata_size;
     }
 
     //for free usage
@@ -67,62 +67,86 @@ public:
         num_free_bytes += toRemove->size;
         toRemove->is_free = true;
     }
+
     int getMetadataSize() {
         return metadata_size;
     }
 
-    void initializeMetadata(MallocMetadata* metadata, size_t size) {
-        metadata->size = size;
-        metadata->is_free = false;
-        metadata->next = nullptr;
-        metadata->prev = nullptr;
-    }
 };
 
 void* smalloc(size_t size) {
     MemoryList& memList = MemoryList::getInstance();
     if(size == 0 || size > 1e8)
         return nullptr;
-    MemoryList::MallocMetadata* newMetadata = reinterpret_cast<MemoryList::MallocMetadata*>(sbrk(size + memList.getMetadataSize()));
-    if(!newMetadata)
+
+    MemoryList::MallocMetadata* newMetadata = (MemoryList::MallocMetadata*)(sbrk(size + memList.getMetadataSize()));
+    if(newMetadata == (void*)(-1))
         return nullptr;
-    memList.initializeMetadata(newMetadata, size);
-    return memList.insert(newMetadata);
+
+    return memList.insert(newMetadata, size);
 }
 void* scalloc(size_t num, size_t size) {
+    if (num == 0 || size == 0 || size * num > 1e8) 
+        return nullptr;
 
+    void* newAddress = smalloc(num * size);
+    if (newAddress == nullptr) 
+        return nullptr;
+
+    memset(newAddress, 0, num * size);
+    return newAddress;
 }
 
 void sfree(void* p) {
-
+    if (p == nullptr) 
+        return;
+    
+    MemoryList& memList = MemoryList::getInstance();
+    memList.remove((MemoryList::MallocMetadata*)(p - memList.getMetadataSize()));
 }
 
 void* srealloc(void* oldp, size_t size) {
+    MemoryList& memList = MemoryList::getInstance();
+    if (size == 0 || size > 1e8 || size <= (MemoryList::MallocMetadata*)(oldp - memList.getMetadataSize())->size)
+        return nullptr;
+    
+    if (oldp == nullptr)
+        return smalloc(size);
 
+    void* newAddress = memList.insert((MemoryList::MallocMetadata*)(oldp - memList.getMetadataSize()), size);
+    newAddress = memmove(newAddress, oldp, size);
+    sfree(oldp);
+    return newAddress;
 }
 
 size_t _num_free_blocks() {
-
+    MemoryList& memList = MemoryList::getInstance();
+    return memList.num_free_blocks;
 }
 
 size_t _num_free_bytes() {
-
+    MemoryList& memList = MemoryList::getInstance();
+    return memList.num_free_bytes;
 }
 
 size_t _num_allocated_blocks() {
-
+    MemoryList& memList = MemoryList::getInstance();
+    return memList.num_allocated_blocks + memList.num_free_blocks;
 }
 
 size_t _num_allocated_bytes() {
-    
+    MemoryList& memList = MemoryList::getInstance();
+    return memList.num_allocated_bytes + memList.num_free_bytes;
 }
 
 size_t _num_meta_data_bytes() {
-
+    MemoryList& memList = MemoryList::getInstance();
+    return _num_allocated_blocks() * memList.getMetadataSize();
 }
 
 size_t _size_meta_data() {
-
+    MemoryList& memList = MemoryList::getInstance();
+    return memList.getMetadataSize();
 }
 
 
