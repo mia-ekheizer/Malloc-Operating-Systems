@@ -1,7 +1,31 @@
 #include <unistd.h>
+#define MAX_ORDER 10
+#define MAX_BLOCK_SIZE ((2 ** 10) * 128)
+#define NUM_INITIAL_BLOCKS 32
+#define MIN_BLOCK_SIZE 128
 
 class MemoryArray
 {
+private:
+    MemoryList memory_array[MAX_ORDER + 1];
+    int num_allocated_blocks;
+    int num_allocated_bytes;
+    MemoryArray()
+    {
+        num_allocated_blocks = 0;
+        num_allocated_bytes = 0;    
+        for(int i = 0; i <= MAX_ORDER; i++) {
+            memory_array[i] = NULL;
+        }
+        memory_array[MAX_ORDER + 1] = MemoryList();
+        void* newAddress = sbrk(MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS);
+        if(newAddress == (void*)(-1)) //TODO: is necessary?
+            exit(0);
+        for (int block_num = 1; block_num <= NUM_INITIAL_BLOCKS; block_num++) {
+            memory_array[MAX_ORDER + 1].insert((MemoryArray::MemoryList::MallocMetadata*)(newAddress + (block_num * MAX_BLOCK_SIZE)), MAX_BLOCK_SIZE);
+        }
+    }
+    
     class MemoryList
     {
     public:
@@ -15,17 +39,18 @@ class MemoryArray
 
     private:
         MallocMetadata dummy;
-        const int metadata_size = sizeof(MallocMetadata);
-
+        int num_free_blocks;
+        
     public:
         MemoryList()
         {
             dummy.next = nullptr;
             dummy.prev = nullptr;
+            num_free_blocks = 0;
         }
 
-        // for allocation usage
-        void *insert(MallocMetadata *newMetadata, size_t size)
+        // TODO: adjust to new implementation
+        void *insert(MallocMetadata *newMetadata)
         {
             newMetadata->size = size;
             MallocMetadata *temp = &dummy;
@@ -51,64 +76,85 @@ class MemoryArray
             return newMetadata + metadata_size;
         }
 
-        // for free usage
-        void remove(MallocMetadata *toRemove)
+        MallocMetadata* remove() //DONE
         {
-            if (!toRemove || toRemove->is_free)
-                return;
-
-            num_allocated_blocks--;
-            num_allocated_bytes -= toRemove->size;
-            num_free_blocks++;
-            num_free_bytes += toRemove->size;
-            toRemove->is_free = true;
-        }
-
-        int getMetadataSize()
-        {
-            return metadata_size;
+            MallocMetadata* toRemove = dummy->next;
+            dummy->next = toRemove->next;
+            toRemove->next->prev = dummy;
+            num_free_blocks--;
+            num_free_bytes -= toRemove->size;
+            return toRemove;
         }
     };
     
-private:
-    MemoryList* memory_array[11];
-
-    int num_free_blocks;
-    int num_free_bytes;
-    int num_allocated_blocks;
-    int num_allocated_bytes;
-
-    MemoryArray()
-        {
-            for(int i = 0; i <= 11; i++) {
-                memory_array[i] = 
-            }
-            num_free_blocks = 0;
-            num_free_bytes = 0;
-            num_allocated_blocks = 0;
-            num_allocated_bytes = 0;
-        }
-
 public:
     static MemoryArray &getInstance()
-        {
-            static MemoryArray instance;
-            return instance;
-        }
+    {
+        static MemoryArray instance;
+        return instance;
+    }
 
-}
+    ~MemoryArray() {
+        // TODO: do we need to reset the program break?
+    }
+    int getRelevantEntryForInsert(size_t size) {
+        size /= 128;
+        int relevantEntry = 0;
+        while(size > 0)
+        {
+            size /= 2;
+            relevantEntry++;
+        }
+        return relevantEntry;
+    }
+    
+    void insert(MemoryList::MallocMetadata* newFreeBlock) { // insert in an ascending order by the address, plus combine buddies iteratively
+        int relevantEntry = getRelevantEntryForInsert(newFreeBlock->size);
+        /* TODO:
+        if((newFreeBlockSize XOR Size) in memory_array[curr_entry]) {
+            merge blocks iteratively (stop when we get to entry No.10)
+        }
+        */
+        memory_array[relevantEntry].insert(newFreeBlock);
+        //TODO: add statistics
+    }
+
+    MemoryList::MallocMetadata* remove(size_t size) { //remove block of the correct size from the free list
+        int relevantEntry = getBiggerThanEqualToEntry(size);
+        int relevantEntrySize = MIN_BLOCK_SIZE * (2 ** relevantEntry);
+        while (size < (relevantEntrySize / 2 - sizeof(MemoryList::MallocMetadata))) { // split the blocks until we get a block of the correct size
+            MemoryList::MallocMetadata* wantedAddress = memory_array[relevantEntry].remove();
+            MemoryList::MallocMetadata* buddyAddress = wantedAddress + relevantEntrySize / 2;
+            memory_array[relevantEntry - 1].insert(buddyAddress);
+            memory_array[relevantEntry - 1].insert(wantedAddress);
+            //insert the right side of split block
+            relevantEntrySize /= 2;
+            relevantEntry--;
+        }
+        num_allocated_blocks++;
+        num_allocated_bytes += relevantEntrySize;                           
+        return memory_array[relevantEntry].remove() + sizeof(MemoryList::MallocMetadata);
+    }
+
+    int getBiggerThanEqualToEntry(size_t size) {
+        int curr_entry_size;
+        for (int entry = 0; entry < MAX_ORDER+1; entry++) { // find the first index that has a fitting/bigger size block
+            int curr_entry_size = MIN_BLOCK_SIZE * (2 ** entry);
+            if (memory_array[entry] != NULL && size < curr_entry_size - sizeof(MemoryList::MallocMetadata)) {
+                return entry;
+            }
+        }
+    }
+    
+};
 
 void* smalloc(size_t size)
 {
-    MemoryList& memList = MemoryList::getInstance();
+    MemoryArray& memArr = MemoryArray::getInstance();
     if(size == 0 || size > 1e8)
         return nullptr;
 
-    MemoryList::MallocMetadata* newMetadata = (MemoryList::MallocMetadata*)(sbrk(size + memList.getMetadataSize()));
-    if(newMetadata == (void*)(-1))
-        return nullptr;
-
-    return memList.insert(newMetadata, size);
+    return memArr.remove(size);
 }
 
 void* scalloc(size_t num, size_t size) {
@@ -123,12 +169,13 @@ void* scalloc(size_t num, size_t size) {
     return newAddress;
 }
 
+// TODO: CONTINUE ADJUSTING FROM HERE ON
 void sfree(void* p) {
     if (p == nullptr) 
         return;
     
-    MemoryList& memList = MemoryList::getInstance();
-    memList.remove((MemoryList::MallocMetadata*)(p - memList.getMetadataSize()));
+    MemoryArray& memArray = MemoryArray::getInstance();
+    memArray.insert((MemoryList::MallocMetadata*)(p - memList.getMetadataSize()));
 }
 
 void* srealloc(void* oldp, size_t size) {
