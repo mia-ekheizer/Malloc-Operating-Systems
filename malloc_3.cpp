@@ -111,7 +111,7 @@ public:
     void insert(MemoryList::MallocMetadata* newFreeBlock) { // insert in an ascending order by the address, plus combine buddies iteratively
         int relevantEntry = getRelevantEntryForInsert(newFreeBlock->size);
         /* TODO:
-        if((newFreeBlockSize XOR Size) in memory_array[curr_entry]) {
+        if((((newFreeBlockSize - offset) XOR Size) + offset) in memory_array[curr_entry]) {
             merge blocks iteratively (stop when we get to entry No.10)
         }
         */
