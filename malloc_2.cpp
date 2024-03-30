@@ -13,8 +13,8 @@ private:
     MallocMetadata dummy;
     int num_free_blocks;
     int num_free_bytes;
-    int num_allocated_blocks;
-    int num_allocated_bytes;
+    int num_used_blocks;
+    int num_used_bytes;
     const int metadata_size = sizeof(MallocMetadata);
 
     //private constructor
@@ -23,8 +23,8 @@ private:
         dummy.prev = nullptr;
         num_free_blocks = 0;
         num_free_bytes = 0;
-        num_allocated_blocks = 0;
-        num_allocated_bytes = 0;
+        num_used_blocks = 0;
+        num_used_bytes = 0;
     }
 
 public:
@@ -42,8 +42,8 @@ public:
             if (temp->is_free && temp->size >= newMetadata->size) {
                 temp->is_free = false;
                 num_free_blocks--;
-                num_allocated_blocks++; 
-                num_allocated_bytes += temp->size; // the size of the block that was allocated
+                num_used_blocks++; 
+                num_used_bytes += temp->size; // the size of the block that was allocated
                 num_free_bytes -= temp->size;
                 return temp + metadata_size;
             }
@@ -53,8 +53,8 @@ public:
         newMetadata->prev = temp;
         newMetadata->next = nullptr;
         newMetadata->is_free = false;
-        num_allocated_blocks++;
-        num_allocated_bytes += newMetadata->size;
+        num_used_blocks++;
+        num_used_bytes += newMetadata->size;
         return newMetadata + metadata_size;
     }
 
@@ -63,8 +63,8 @@ public:
         if(!toRemove || toRemove->is_free)
             return;
     
-        num_allocated_blocks--;
-        num_allocated_bytes -= toRemove->size;
+        num_used_blocks--;
+        num_used_bytes -= toRemove->size;
         num_free_blocks++;
         num_free_bytes += toRemove->size;
         toRemove->is_free = true;
@@ -133,12 +133,12 @@ size_t _num_free_bytes() {
 
 size_t _num_allocated_blocks() {
     MemoryList& memList = MemoryList::getInstance();
-    return memList.num_allocated_blocks + memList.num_free_blocks;
+    return memList.num_used_blocks + memList.num_free_blocks;
 }
 
 size_t _num_allocated_bytes() {
     MemoryList& memList = MemoryList::getInstance();
-    return memList.num_allocated_bytes + memList.num_free_bytes;
+    return memList.num_used_bytes + memList.num_free_bytes;
 }
 
 size_t _num_meta_data_bytes() {

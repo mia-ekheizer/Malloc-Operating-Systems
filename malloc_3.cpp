@@ -9,15 +9,17 @@ class MemoryList;
 
 class MemoryArray
 {
-private:
+public:
     MemoryList memory_array[MAX_ORDER + 1];
-    int num_allocated_blocks;
-    int num_allocated_bytes;
+private:
+    
+    int num_used_blocks;
+    int num_used_bytes;
     int offset;
     MemoryArray()
     {
-        num_allocated_blocks = 0;
-        num_allocated_bytes = 0;    
+        num_used_blocks = 0;
+        num_used_bytes = 0;    
         for(int i = 0; i <= MAX_ORDER; i++) {
             memory_array[i] = nullptr;
         }
@@ -45,7 +47,6 @@ private:
         
         MallocMetadata dummy;
         int num_free_blocks;
-
         MemoryList()
         {
             dummy.next = nullptr;
@@ -156,8 +157,8 @@ public:
                 memory_array[relevantEntry] = MemoryList();
             }
             memory_array[relevantEntry].insert(newFreeBlock);
-            num_allocated_blocks--;
-            num_allocated_bytes -= originalSize;
+            num_used_blocks--;
+            num_used_bytes -= originalSize;
         }
     }
 
@@ -181,8 +182,8 @@ public:
         }
         relevantEntrySize *= 2;
         relevantEntry++;
-        num_allocated_blocks++;
-        num_allocated_bytes += relevantEntrySize;                         
+        num_used_blocks++;
+        num_used_bytes += relevantEntrySize;                         
         return (void*)(memory_array[relevantEntry].remove() + sizeof(MemoryList::MallocMetadata));
     }
 
@@ -228,6 +229,7 @@ void sfree(void* p) {
     memArray.insert(newFreeMemory, newFreeMemory->size);
 }
 
+// TODO
 void* srealloc(void* oldp, size_t size) {
     MemoryList& memList = MemoryList::getInstance();
     if (size == 0 || size > 1e8 || size <= (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryArray::MemoryList::MallocMetadata))->size)
@@ -242,29 +244,36 @@ void* srealloc(void* oldp, size_t size) {
     return newAddress;
 }
 
-size_t _num_free_blocks() { //TODO: iterate over the cells in the array and sum up the num_free_blocks
-    MemoryList& memList = MemoryList::getInstance();
-    return memList.num_free_blocks;
+size_t _num_free_blocks() {
+    MemoryArray& memArray = MemoryArray::getInstance();
+    int sum_num_free_blocks = 0;
+    for (int i = 0; i < MAX_ORDER + 1; i++) {
+        sum_num_free_blocks += memArray.memory_array[i].num_free_blocks;
+    }
+    return sum_num_free_blocks;
 }
 
-size_t _num_free_bytes() { // TODO: iterate over the cells in the array and sum up the num_free_blocks * sizeofEntryBlock
-    MemoryList& memList = MemoryList::getInstance();
-    return memList.num_free_bytes;
+size_t _num_free_bytes() {
+    MemoryArray& memArray = MemoryArray::getInstance();
+    int sum_num_free_bytes = 0;
+    for (int i = 0; i < MAX_ORDER + 1; i++) {
+        sum_num_free_bytes += memArray.memory_array[i].num_free_blocks * (MIN_BLOCK_SIZE * (2 ** i));
+    }
+    return sum_num_free_bytes;
 }
 
-size_t _num_allocated_blocks() {//TODO: already maintained by Array
-    MemoryList& memList = MemoryList::getInstance();
-    return memList.num_allocated_blocks + memList.num_free_blocks;
+size_t _num_allocated_blocks() {
+    MemoryArray& memArr = MemoryArray::getInstance();
+    return memArr.num_used_blocks + _num_free_blocks();
 }
 
-size_t _num_allocated_bytes() { //TODO: already maintained by Array
-    MemoryList& memList = MemoryList::getInstance();
-    return memList.num_allocated_bytes + memList.num_free_bytes;
+size_t _num_allocated_bytes() {
+    MemoryArray& memArr = MemoryArray::getInstance();
+    return memArr.num_used_bytes + _num_free_bytes();
 }
 
-size_t _num_meta_data_bytes() { //TODO: similar to before, already got all data maintained
-    MemoryList& memList = MemoryList::getInstance();
-    return _num_allocated_blocks() * memList.getMetadataSize();
+size_t _num_meta_data_bytes() { 
+    return _num_allocated_blocks() * _size_meta_data();
 }
 
 size_t _size_meta_data() {
