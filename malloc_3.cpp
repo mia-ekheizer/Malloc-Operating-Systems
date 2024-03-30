@@ -199,12 +199,20 @@ public:
     }
 };
 
+// implement a list for mmaped allocated blocks.
+
 void* smalloc(size_t size)
 {
     MemoryArray& memArr = MemoryArray::getInstance();
     if(size == 0 || size > 1e8)
         return nullptr;
 
+    /*  TODO:
+        if (size >= MAX_BLOCK_SIZE)
+            add to the mmapped blocks list;
+            update used blocks\bytes statistics
+            return mmap();
+    */
     return memArr.remove(size);
 }
 
@@ -224,26 +232,51 @@ void sfree(void* p) {
     if (p == nullptr) 
         return;
     
+    /*  TODO:
+        if (sizeof(p) >= MAX_BLOCK_SIZE)
+            remove from the mmapped blocks list;
+            munmap(p);
+            update used blocks\bytes statistics
+            return;
+    */
+   
     MemoryArray& memArray = MemoryArray::getInstance();
     MemoryArray::MemoryList::MallocMetadata* newFreeMemory = (MemoryArray::MemoryList::MallocMetadata*)(p - sizeof(MemoryArray::MemoryList::MallocMetadata));
     memArray.insert(newFreeMemory, newFreeMemory->size);
 }
 
-// TODO
 void* srealloc(void* oldp, size_t size) {
-    MemoryList& memList = MemoryList::getInstance();
-    if (size == 0 || size > 1e8 || size <= (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryArray::MemoryList::MallocMetadata))->size)
+    /*
+        if (size >= MAX_BLOCK_SIZE)
+            (allocate new block from the mmaped list)
+        if(size <= currSize)
+            (reuse the same block)
+        else {
+            if(size <= allBuddyBlocksSize)
+                (merge all buddy blocks iteratively and allocate the merged block)
+            else {
+                allocate new block in the desired size(use smalloc).
+            }
+        }
+
+    */
+    MemoryArray& memArray = MemoryArray::getInstance();
+    if (size == 0 || size > 1e8)
         return nullptr;
-    
+
     if (oldp == nullptr)
         return smalloc(size);
+    
+    if (size <= (MemoryArray::MemoryList::MallocMetadata*)(oldp - sizeof(MemoryArray::MemoryList::MallocMetadata))->size)
+        return oldp;
 
-    void* newAddress = memList.insert((MemoryList::MallocMetadata*)(oldp - sizeof(MemoryArray::MemoryList::MallocMetadata)), size);
+    void* newAddress = memList.insert((MemoryArray::MemoryList::MallocMetadata*)(oldp - sizeof(MemoryArray::MemoryList::MallocMetadata)), size);
     newAddress = memmove(newAddress, oldp, size);
     sfree(oldp);
     return newAddress;
 }
 
+// add the statistics of the mmapped blocks (without munmapped)
 size_t _num_free_blocks() {
     MemoryArray& memArray = MemoryArray::getInstance();
     int sum_num_free_blocks = 0;

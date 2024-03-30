@@ -109,11 +109,14 @@ void sfree(void* p) {
 
 void* srealloc(void* oldp, size_t size) {
     MemoryList& memList = MemoryList::getInstance();
-    if (size == 0 || size > 1e8 || size <= (MemoryList::MallocMetadata*)(oldp - memList.getMetadataSize())->size)
+    if (size == 0 || size > 1e8)
         return nullptr;
-    
+
     if (oldp == nullptr)
         return smalloc(size);
+    
+    if (size <= (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryList::MallocMetadata))->size)
+        return oldp;
 
     void* newAddress = memList.insert((MemoryList::MallocMetadata*)(oldp - memList.getMetadataSize()), size);
     newAddress = memmove(newAddress, oldp, size);
