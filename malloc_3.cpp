@@ -1,4 +1,7 @@
 #include <unistd.h>
+#include <string.h>
+#include <cstring>
+#include <sys/mman.h>
 
 #define MAX_ORDER 10
 #define MAX_BLOCK_SIZE ((2 ** 10) * 128)
@@ -94,7 +97,7 @@ private:
         
         offset = (newAddress - initialProgramBreak) % (NUM_INITIAL_BLOCKS * MAX_BLOCK_SIZE);
         for (int block_num = 1; block_num <= NUM_INITIAL_BLOCKS; block_num++) {
-            memory_array[MAX_ORDER + 1].insert((MemoryArray::MemoryList::MallocMetadata*)(newAddress + (block_num * MAX_BLOCK_SIZE)), MAX_BLOCK_SIZE);
+            memory_array[MAX_ORDER + 1].insert((MemoryList::MallocMetadata*)(reinterpret_cast<uintptr_t>(newAddress) + (block_num * MAX_BLOCK_SIZE)), MAX_BLOCK_SIZE);
         }
     }
     
@@ -125,7 +128,7 @@ public:
         MemoryList memList = memory_array[entry];
         MemoryList::MallocMetadata* curr_metadata = memList.dummy;
         while (curr_metadata->next != nullptr) {
-            if(curr_metadata == (MemoryList::MallocMetadata*)((newFreeBlock - offset)^(newFreeBlock->size) + offset)) {
+            if(curr_metadata == (MemoryList::MallocMetadata*)((reinterpret_cast<uintptr_t>(newFreeBlock) - offset)^(newFreeBlock->size) + offset)) {
                 return curr_metadata;
             }
             curr_metadata = curr_metadata->next;
@@ -137,7 +140,7 @@ public:
         int entry = getRelevantEntry(newFreeBlock->size + sizeof(MemoryList::MallocMetadata));
         memory_array[entry].remove(firstBuddyAddress);
         memory_array[entry].remove(secondBuddyAddress);
-        MemoryList::MallocMetadata* parent = (firstBuddyAddress < secondBuddyAddress) ? firstBuddyAddress : secondBuddyAddress;
+        MemoryList::MallocMetadata* parent = (reinterpret_cast<uintptr_t>(firstBuddyAddress) < reinterpret_cast<uintptr_t>(secondBuddyAddress)) ? firstBuddyAddress : secondBuddyAddress;
         parent->size = 2 * firstBuddyAddress->size;
         return parent;
     }
@@ -171,7 +174,7 @@ public:
         // split the blocks until we get a block of the correct size
         while (size <= (relevantEntrySize / 2 - sizeof(MemoryList::MallocMetadata))) { 
             MemoryList::MallocMetadata* wantedAddress = memory_array[relevantEntry].remove();
-            MemoryList::MallocMetadata* buddyAddress = (MemoryList::MallocMetadata*)(wantedAddress + relevantEntrySize / 2);
+            MemoryList::MallocMetadata* buddyAddress = (MemoryList::MallocMetadata*)(reinterpret_cast<uintptr_t>(wantedAddress) + relevantEntrySize / 2);
             if (memory_array[relevantEntry - 1] == NULL) {
                 memory_array[relevantEntry - 1] = MemoryList();
             }
@@ -222,7 +225,7 @@ MemoryList::MallocMetadata* isMergePossible(MemoryList::MallocMetadata* currMeta
         MemoryList::MallocMetadata* buddyAddress = isBuddyInEntry(currAddress, relevantEntry);
         if (buddyAddress != nullptr && relevantEntry != MAX_ORDER) {
             currSize *= 2;
-            currAddress = (currAddress < buddyAddress) ? currAddress : buddyAddress;
+            currAddress = (reinterpret_cast<uintptr_t>(currAddress) < reinterpret_cast<uintptr_t>(buddyAddress)) ? currAddress : buddyAddress;
             relevantEntry++;
         }
         else {
@@ -261,7 +264,7 @@ void sfree(void* p) {
         return;
 
     MemoryArray& memArray = MemoryArray::getInstance();
-    MemoryList::MallocMetadata* newFreeMemory = (MemoryList::MallocMetadata*)(p - sizeof(MemoryList::MallocMetadata));
+    MemoryList::MallocMetadata* newFreeMemory = (MemoryList::MallocMetadata*)p - 1;
     if(newFreeMemory->size > MAX_BLOCK_SIZE - sizeof(MemoryList::MallocMetadata)) {
         mummap(newFreeMemory, newFreeMemory->size + sizeof(MemoryList::MallocMetadata));
         memArray.num_used_blocks--;
@@ -274,7 +277,7 @@ void sfree(void* p) {
 
 void* srealloc(void* oldp, size_t size) {
     MemoryArray& memArray = MemoryArray::getInstance();
-    MemoryList::MallocMetadata* meta_data = (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryList::MallocMetadata));
+    MemoryList::MallocMetadata* meta_data = (MemoryList::MallocMetadata*)oldp - 1;
     if (size == 0 || size > 1e8)
         return nullptr;
 
@@ -294,7 +297,7 @@ void* srealloc(void* oldp, size_t size) {
         }
     }
     else {
-        if (size <= (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryList::MallocMetadata))->size) {
+        if (size <= (MemoryList::MallocMetadata*)((MemoryList::MallocMetadata*)(oldp) - 1)->size) {
             meta_data->size = size;
             return oldp;
         }

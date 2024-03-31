@@ -1,4 +1,6 @@
 #include <unistd.h>
+#include <string.h>
+#include <cstring>
 
 class MemoryList {
 public:
@@ -9,14 +11,13 @@ public:
         MallocMetadata* prev;
     } MallocMetadata;
 
-private:  
     MallocMetadata dummy;
     int num_free_blocks;
     int num_free_bytes;
     int num_used_blocks;
     int num_used_bytes;
-    const int metadata_size = sizeof(MallocMetadata);
 
+private:
     //private constructor
     MemoryList() {
         dummy.next = nullptr;
@@ -69,10 +70,6 @@ public:
         num_free_bytes += toRemove->size;
         toRemove->is_free = true;
     }
-
-    int getMetadataSize() {
-        return metadata_size;
-    }
 };
 
 void* smalloc(size_t size) {
@@ -104,7 +101,7 @@ void sfree(void* p) {
         return;
     
     MemoryList& memList = MemoryList::getInstance();
-    memList.remove((MemoryList::MallocMetadata*)(p - memList.getMetadataSize()));
+    memList.remove((MemoryList::MallocMetadata*)p - 1);
 }
 
 void* srealloc(void* oldp, size_t size) {
@@ -115,11 +112,11 @@ void* srealloc(void* oldp, size_t size) {
     if (oldp == nullptr)
         return smalloc(size);
     
-    if (size <= (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryList::MallocMetadata))->size)
+    if (size <= ((MemoryList::MallocMetadata*)oldp - 1)->size)
         return oldp;
 
-    void* newAddress = memList.insert((MemoryList::MallocMetadata*)(oldp - memList.getMetadataSize()), size);
-    newAddress = memmove(newAddress, oldp, (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryList::MallocMetadata))->size);
+    void* newAddress = memList.insert((MemoryList::MallocMetadata*)oldp - 1, size);
+    newAddress = memmove(newAddress, oldp, ((MemoryList::MallocMetadata*)oldp - 1)->size);
     sfree(oldp);
     return newAddress;
 }
