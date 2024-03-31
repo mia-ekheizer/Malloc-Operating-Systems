@@ -119,7 +119,7 @@ void* srealloc(void* oldp, size_t size) {
         return oldp;
 
     void* newAddress = memList.insert((MemoryList::MallocMetadata*)(oldp - memList.getMetadataSize()), size);
-    newAddress = memmove(newAddress, oldp, size);
+    newAddress = memmove(newAddress, oldp, (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryList::MallocMetadata))->size);
     sfree(oldp);
     return newAddress;
 }

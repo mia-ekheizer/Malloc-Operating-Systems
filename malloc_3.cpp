@@ -5,19 +5,82 @@
 #define NUM_INITIAL_BLOCKS 32
 #define MIN_BLOCK_SIZE 128
 
-class MemoryList;
+class MemoryList {
+public:
+    typedef struct MallocMetadata
+    {
+        size_t size;
+        MallocMetadata *next;
+        MallocMetadata *prev;
+    } MallocMetadata;
+    
+    MallocMetadata dummy;
+    int num_free_blocks;
+    MemoryList()
+    {
+        dummy.next = nullptr;
+        dummy.prev = nullptr;
+        num_free_blocks = 0;
+    }
+
+    void* insert(MallocMetadata *newMetadata)
+    {
+        newMetadata->size = size;
+        MallocMetadata *temp = &dummy;
+        MallocMetadata *previousNode = nullptr;
+        
+        while(temp && temp < newMetadata) {//find correct position
+            previousNode = temp;
+            temp = temp->next;
+        }
+        if(!previousNode) { //prev is null, only dummy in list
+            dummy.next = newMetadata;
+            newMetadata->prev = &dummy;
+        }
+        else {
+            previousNode->next = newMetadata;
+            newMetadata->prev = previousNode;
+        }
+        newMetadata->next = temp;
+        num_free_blocks++;
+        return newMetadata + metadata_size;
+    }
+
+    MallocMetadata* remove()
+    {
+        MallocMetadata* toRemove = dummy->next;
+        dummy->next = toRemove->next;
+        toRemove->next->prev = dummy;
+        num_free_blocks--;
+        return toRemove;
+    }
+    
+    void remove(MallocMetadata* address) {
+        MallocMetadata* temp = dummy.next;
+        while(temp && temp != address) {
+            temp = temp->next;
+        }
+        if(temp && temp == address) {
+            temp->prev->next = temp->next;
+            if(temp->next)
+                temp->next->prev = temp->prev;
+            num_free_blocks--;
+        }
+    }
+};
 
 class MemoryArray
 {
 public:
     MemoryList memory_array[MAX_ORDER + 1];
+    MemoryList big_allocations_list;
 private:
-    
     int num_used_blocks;
     int num_used_bytes;
     int offset;
     MemoryArray()
     {
+        big_allocations_list = NULL;
         num_used_blocks = 0;
         num_used_bytes = 0;    
         for(int i = 0; i <= MAX_ORDER; i++) {
@@ -34,71 +97,6 @@ private:
             memory_array[MAX_ORDER + 1].insert((MemoryArray::MemoryList::MallocMetadata*)(newAddress + (block_num * MAX_BLOCK_SIZE)), MAX_BLOCK_SIZE);
         }
     }
-    
-    class MemoryList
-    {
-    public:
-        typedef struct MallocMetadata
-        {
-            size_t size;
-            MallocMetadata *next;
-            MallocMetadata *prev;
-        } MallocMetadata;
-        
-        MallocMetadata dummy;
-        int num_free_blocks;
-        MemoryList()
-        {
-            dummy.next = nullptr;
-            dummy.prev = nullptr;
-            num_free_blocks = 0;
-        }
-
-        void* insert(MallocMetadata *newMetadata)
-        {
-            newMetadata->size = size;
-            MallocMetadata *temp = &dummy;
-            MallocMetadata *previousNode = nullptr;
-            
-            while(temp && temp < newMetadata) {//find correct position
-                previousNode = temp;
-                temp = temp->next;
-            }
-            if(!previousNode) { //prev is null, only dummy in list
-                dummy.next = newMetadata;
-                newMetadata->prev = &dummy;
-            }
-            else {
-                previousNode->next = newMetadata;
-                newMetadata->prev = previousNode;
-            }
-            newMetadata->next = temp;
-            num_free_blocks++;
-            return newMetadata + metadata_size;
-        }
-
-        MallocMetadata* remove()
-        {
-            MallocMetadata* toRemove = dummy->next;
-            dummy->next = toRemove->next;
-            toRemove->next->prev = dummy;
-            num_free_blocks--;
-            return toRemove;
-        }
-        
-        void remove(MallocMetadata* address) {
-            MallocMetadata* temp = dummy.next;
-            while(temp && temp != address) {
-                temp = temp->next;
-            }
-            if(temp && temp == address) {
-                temp->prev->next = temp->next;
-                if(temp->next)
-                    temp->next->prev = temp->prev;
-                num_free_blocks--;
-            }
-        }
-    };
     
 public:
     static MemoryArray &getInstance()
@@ -136,7 +134,7 @@ public:
     }
     
     MemoryList::MallocMetadata* removeAndMerge(MemoryList::MallocMetadata* firstBuddyAddress, MemoryList::MallocMetadata* secondBuddyAddress) {
-        int entry = getRelevantEntry(newFreeBlock->size);
+        int entry = getRelevantEntry(newFreeBlock->size + sizeof(MemoryList::MallocMetadata));
         memory_array[entry].remove(firstBuddyAddress);
         memory_array[entry].remove(secondBuddyAddress);
         MemoryList::MallocMetadata* parent = (firstBuddyAddress < secondBuddyAddress) ? firstBuddyAddress : secondBuddyAddress;
@@ -145,12 +143,15 @@ public:
     }
 
     // insert in an ascending order by the address, plus combine buddies iteratively
-    void insert(MemoryList::MallocMetadata* newFreeBlock, size_t originalSize) { 
-        int relevantEntry = getRelevantEntry(newFreeBlock->size);
+    void insert(MemoryList::MallocMetadata* newFreeBlock, size_t originalSize, size_t desiredSize) { 
+        int relevantEntry = getRelevantEntry(newFreeBlock->size + sizeof(MemoryList::MallocMetadata));
         MemoryList::MallocMetadata* buddyAddress = isBuddyInEntry(newFreeBlock, relevantEntry);
+        MemoryList::MallocMetadata* parent = buddyAddress;
         if (buddyAddress != nullptr && relevantEntry != MAX_ORDER) {
-            MemoryList::MallocMetadata* parent = removeAndMerge(newFreeBlock, buddyAddress);
-            insert(parent, originalSize);
+            if (desiredSize == 0 || (desiredSize != 0 && parent->size < desiredSize)) {
+                parent = removeAndMerge(newFreeBlock, buddyAddress);
+                insert(parent, originalSize, desiredSize);
+            }
         }
         else {
             if (memory_array[relevantEntry] == NULL) {
@@ -199,7 +200,37 @@ public:
     }
 };
 
-// implement a list for mmaped allocated blocks.
+void* allocateBigBlocks(size_t size) {
+    void* allocMmap = mmap(NULL, size + sizeof(MemoryList::MallocMetadata), PROT_READ | PROT_WRITE | PROT_EXEC, -1, 0);
+    if(allocMmap == (void*)(-1)) {
+        //TODO:
+    }
+    else {
+        MemoryList::MallocMetadata* meta_data = (MemoryList::MallocMetadata*)(allocMmap);
+        meta_data->size = size;
+        memArr.num_used_blocks++;
+        memArr.num_used_bytes += size;
+        return allocMmap;
+    }
+}
+
+MemoryList::MallocMetadata* isMergePossible(MemoryList::MallocMetadata* currMetadata, size_t newSize) { 
+    int currSize = currMetadata->size + sizeof(MemoryList::MallocMetadata);
+    MemoryList::MallocMetadata* currAddress = currMetadata;
+    int relevantEntry = getRelevantEntry(currSize + sizeof(MemoryList::MallocMetadata));
+    while (currSize < newSize) {
+        MemoryList::MallocMetadata* buddyAddress = isBuddyInEntry(currAddress, relevantEntry);
+        if (buddyAddress != nullptr && relevantEntry != MAX_ORDER) {
+            currSize *= 2;
+            currAddress = (currAddress < buddyAddress) ? currAddress : buddyAddress;
+            relevantEntry++;
+        }
+        else {
+            return nullptr;
+        }
+    }
+    return currAddress;
+}
 
 void* smalloc(size_t size)
 {
@@ -207,12 +238,9 @@ void* smalloc(size_t size)
     if(size == 0 || size > 1e8)
         return nullptr;
 
-    /*  TODO:
-        if (size >= MAX_BLOCK_SIZE)
-            add to the mmapped blocks list;
-            update used blocks\bytes statistics
-            return mmap();
-    */
+    if (size > MAX_BLOCK_SIZE  - sizeof(MemoryList::MallocMetadata)) {
+        return allocateBigBlocks(size);
+    }
     return memArr.remove(size);
 }
 
@@ -231,49 +259,59 @@ void* scalloc(size_t num, size_t size) {
 void sfree(void* p) {
     if (p == nullptr) 
         return;
-    
-    /*  TODO:
-        if (sizeof(p) >= MAX_BLOCK_SIZE)
-            remove from the mmapped blocks list;
-            munmap(p);
-            update used blocks\bytes statistics
-            return;
-    */
-   
+
     MemoryArray& memArray = MemoryArray::getInstance();
-    MemoryArray::MemoryList::MallocMetadata* newFreeMemory = (MemoryArray::MemoryList::MallocMetadata*)(p - sizeof(MemoryArray::MemoryList::MallocMetadata));
-    memArray.insert(newFreeMemory, newFreeMemory->size);
+    MemoryList::MallocMetadata* newFreeMemory = (MemoryList::MallocMetadata*)(p - sizeof(MemoryList::MallocMetadata));
+    if(newFreeMemory->size > MAX_BLOCK_SIZE - sizeof(MemoryList::MallocMetadata)) {
+        mummap(newFreeMemory, newFreeMemory->size + sizeof(MemoryList::MallocMetadata));
+        memArray.num_used_blocks--;
+        memArray.num_used_bytes -= size;
+    }
+    else {
+        memArray.insert(newFreeMemory, newFreeMemory->size, 0);
+    }
 }
 
 void* srealloc(void* oldp, size_t size) {
-    /*
-        if (size >= MAX_BLOCK_SIZE)
-            (allocate new block from the mmaped list)
-        if(size <= currSize)
-            (reuse the same block)
-        else {
-            if(size <= allBuddyBlocksSize)
-                (merge all buddy blocks iteratively and allocate the merged block)
-            else {
-                allocate new block in the desired size(use smalloc).
-            }
-        }
-
-    */
     MemoryArray& memArray = MemoryArray::getInstance();
+    MemoryList::MallocMetadata* meta_data = (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryList::MallocMetadata));
     if (size == 0 || size > 1e8)
         return nullptr;
 
     if (oldp == nullptr)
         return smalloc(size);
-    
-    if (size <= (MemoryArray::MemoryList::MallocMetadata*)(oldp - sizeof(MemoryArray::MemoryList::MallocMetadata))->size)
-        return oldp;
 
-    void* newAddress = memList.insert((MemoryArray::MemoryList::MallocMetadata*)(oldp - sizeof(MemoryArray::MemoryList::MallocMetadata)), size);
-    newAddress = memmove(newAddress, oldp, size);
-    sfree(oldp);
-    return newAddress;
+    if (size > MAX_BLOCK_SIZE - sizeof(MemoryList::MallocMetadata)) {
+        if (size == meta_data->size) 
+            return oldp; 
+        else {
+            void* newAddress = allocateBigBlocks(size); // return metadata address
+            newAddress = memmove(newAddress, oldp, meta_data->size);
+            munmap(oldp, meta_data->size + sizeof(MemoryList::MallocMetadata));
+            memArray.num_used_blocks--;
+            memArray.num_used_bytes -= meta_data->size;
+            return newAddress;
+        }
+    }
+    else {
+        if (size <= (MemoryList::MallocMetadata*)(oldp - sizeof(MemoryList::MallocMetadata))->size) {
+            meta_data->size = size;
+            return oldp;
+        }
+
+        else { 
+            MemoryList::MallocMetadata* addressAfterMerge = isMergePossible(meta_data, size)
+            if(addressAfterMerge != nullptr) {
+                memArray.insert(meta_data, meta_data->size, size);//merge buddy blocks
+                int relevantEntry = memArray.getRelevantEntry(size + sizeof(MemoryList::MallocMetadata));
+                addressAfterMerge = memmove(addressAfterMerge, oldp, meta_data->size);
+                return memArray.memory_list[relevantEntry].remove(addressAfterMerge);
+            }
+            else {
+                return smalloc(size);
+            }
+        }
+    }
 }
 
 // add the statistics of the mmapped blocks (without munmapped)
@@ -310,7 +348,7 @@ size_t _num_meta_data_bytes() {
 }
 
 size_t _size_meta_data() {
-    return sizeof(MemoryArray::MemoryList::MallocMetadata);
+    return sizeof(MemoryList::MallocMetadata);
 }
 
 
