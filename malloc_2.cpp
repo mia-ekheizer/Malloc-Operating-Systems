@@ -46,7 +46,7 @@ public:
                 num_used_blocks++; 
                 num_used_bytes += temp->size; // the size of the block that was allocated
                 num_free_bytes -= temp->size;
-                return temp + metadata_size;
+                return temp + sizeof(MemoryList::MallocMetadata);
             }
             temp = temp->next;
         } // no free blocks in the right size found:
@@ -56,7 +56,7 @@ public:
         newMetadata->is_free = false;
         num_used_blocks++;
         num_used_bytes += newMetadata->size;
-        return newMetadata + metadata_size;
+        return newMetadata + sizeof(MemoryList::MallocMetadata);
     }
 
     //for free usage
@@ -77,7 +77,7 @@ void* smalloc(size_t size) {
     if(size == 0 || size > 1e8)
         return nullptr;
 
-    MemoryList::MallocMetadata* newMetadata = (MemoryList::MallocMetadata*)(sbrk(size + memList.getMetadataSize()));
+    MemoryList::MallocMetadata* newMetadata = (MemoryList::MallocMetadata*)(sbrk(size + sizeof(MemoryList::MallocMetadata)));
     if(newMetadata == (void*)(-1))
         return nullptr;
 
@@ -142,13 +142,11 @@ size_t _num_allocated_bytes() {
 }
 
 size_t _num_meta_data_bytes() {
-    MemoryList& memList = MemoryList::getInstance();
-    return _num_allocated_blocks() * memList.getMetadataSize();
+    return _num_allocated_blocks() * sizeof(MemoryList::MallocMetadata);
 }
 
 size_t _size_meta_data() {
-    MemoryList& memList = MemoryList::getInstance();
-    return memList.getMetadataSize();
+    return sizeof(MemoryList::MallocMetadata);
 }
 
 

@@ -17,7 +17,7 @@ public:
         MallocMetadata *prev;
     } MallocMetadata;
     
-    MallocMetadata dummy;
+    MallocMetadata* dummy;
     int num_free_blocks;
     MemoryList()
     {
@@ -28,7 +28,6 @@ public:
 
     void* insert(MallocMetadata *newMetadata)
     {
-        newMetadata->size = size;
         MallocMetadata *temp = &dummy;
         MallocMetadata *previousNode = nullptr;
         
@@ -46,7 +45,7 @@ public:
         }
         newMetadata->next = temp;
         num_free_blocks++;
-        return newMetadata + metadata_size;
+        return newMetadata + sizeof(MallocMetadata);
     }
 
     MallocMetadata* remove()
@@ -75,29 +74,26 @@ public:
 class MemoryArray
 {
 public:
-    MemoryList memory_array[MAX_ORDER + 1];
-    MemoryList big_allocations_list;
-private:
+    MemoryList* memory_array[MAX_ORDER + 1];
     int num_used_blocks;
     int num_used_bytes;
     int offset;
+
+private:
     MemoryArray()
     {
-        big_allocations_list = NULL;
         num_used_blocks = 0;
         num_used_bytes = 0;    
         for(int i = 0; i <= MAX_ORDER; i++) {
             memory_array[i] = nullptr;
         }
-        memory_array[MAX_ORDER + 1] = MemoryList();
         void* initialProgramBreak = sbrk(0);
         void* newAddress = sbrk(MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS);
-        if(newAddress == (void*)(-1)) //TODO: is necessary?
-            exit(0);
+        // if(newAddress == (void*)(-1)) //TODO: is necessary?
         
-        offset = (newAddress - initialProgramBreak) % (NUM_INITIAL_BLOCKS * MAX_BLOCK_SIZE);
+        offset = (reinterpret_cast<intptr_t>(newAddress) - reinterpret_cast<intptr_t>(initialProgramBreak)) % (NUM_INITIAL_BLOCKS * MAX_BLOCK_SIZE);
         for (int block_num = 1; block_num <= NUM_INITIAL_BLOCKS; block_num++) {
-            memory_array[MAX_ORDER + 1].insert((MemoryList::MallocMetadata*)(reinterpret_cast<uintptr_t>(newAddress) + (block_num * MAX_BLOCK_SIZE)), MAX_BLOCK_SIZE);
+            memory_array[MAX_ORDER + 1]->insert((MemoryList::MallocMetadata*)(reinterpret_cast<intptr_t>(newAddress) + (block_num * MAX_BLOCK_SIZE)), MAX_BLOCK_SIZE);
         }
     }
     
@@ -125,10 +121,10 @@ public:
     
     MemoryList::MallocMetadata* isBuddyInEntry(MemoryList::MallocMetadata* newFreeBlock, int entry) {
         //iterate over the whole list.
-        MemoryList memList = memory_array[entry];
+        MemoryList* memList = memory_array[entry];
         MemoryList::MallocMetadata* curr_metadata = memList.dummy;
         while (curr_metadata->next != nullptr) {
-            if(curr_metadata == (MemoryList::MallocMetadata*)((reinterpret_cast<uintptr_t>(newFreeBlock) - offset)^(newFreeBlock->size) + offset)) {
+            if(curr_metadata == (MemoryList::MallocMetadata*)((reinterpret_cast<intptr_t>(newFreeBlock) - offset)^(newFreeBlock->size) + offset)) {
                 return curr_metadata;
             }
             curr_metadata = curr_metadata->next;
@@ -137,10 +133,10 @@ public:
     }
     
     MemoryList::MallocMetadata* removeAndMerge(MemoryList::MallocMetadata* firstBuddyAddress, MemoryList::MallocMetadata* secondBuddyAddress) {
-        int entry = getRelevantEntry(newFreeBlock->size + sizeof(MemoryList::MallocMetadata));
-        memory_array[entry].remove(firstBuddyAddress);
-        memory_array[entry].remove(secondBuddyAddress);
-        MemoryList::MallocMetadata* parent = (reinterpret_cast<uintptr_t>(firstBuddyAddress) < reinterpret_cast<uintptr_t>(secondBuddyAddress)) ? firstBuddyAddress : secondBuddyAddress;
+        int entry = getRelevantEntry(firstBuddyAddress->size + sizeof(MemoryList::MallocMetadata));
+        memory_array[entry]->remove(firstBuddyAddress);
+        memory_array[entry]->remove(secondBuddyAddress);
+        MemoryList::MallocMetadata* parent = (reinterpret_cast<intptr_t>(firstBuddyAddress) < reinterpret_cast<intptr_t>(secondBuddyAddress)) ? firstBuddyAddress : secondBuddyAddress;
         parent->size = 2 * firstBuddyAddress->size;
         return parent;
     }
@@ -157,10 +153,7 @@ public:
             }
         }
         else {
-            if (memory_array[relevantEntry] == NULL) {
-                memory_array[relevantEntry] = MemoryList();
-            }
-            memory_array[relevantEntry].insert(newFreeBlock);
+            memory_array[relevantEntry]->insert(newFreeBlock);
             num_used_blocks--;
             num_used_bytes -= originalSize;
         }
@@ -173,13 +166,10 @@ public:
         int relevantEntrySize = MIN_BLOCK_SIZE * (2 ** relevantEntry);
         // split the blocks until we get a block of the correct size
         while (size <= (relevantEntrySize / 2 - sizeof(MemoryList::MallocMetadata))) { 
-            MemoryList::MallocMetadata* wantedAddress = memory_array[relevantEntry].remove();
+            MemoryList::MallocMetadata* wantedAddress = memory_array[relevantEntry]->remove();
             MemoryList::MallocMetadata* buddyAddress = (MemoryList::MallocMetadata*)(reinterpret_cast<uintptr_t>(wantedAddress) + relevantEntrySize / 2);
-            if (memory_array[relevantEntry - 1] == NULL) {
-                memory_array[relevantEntry - 1] = MemoryList();
-            }
-            memory_array[relevantEntry - 1].insert(buddyAddress);
-            memory_array[relevantEntry - 1].insert(wantedAddress);
+            memory_array[relevantEntry - 1]->insert(buddyAddress);
+            memory_array[relevantEntry - 1]->insert(wantedAddress);
             //insert the right side of split block
             relevantEntrySize /= 2;
             relevantEntry--;
@@ -188,7 +178,7 @@ public:
         relevantEntry++;
         num_used_blocks++;
         num_used_bytes += relevantEntrySize;                         
-        return (void*)(memory_array[relevantEntry].remove() + sizeof(MemoryList::MallocMetadata));
+        return (void*)(memory_array[relevantEntry]->remove() + sizeof(MemoryList::MallocMetadata));
     }
 
     int getBiggerThanEqualToEntry(size_t size) {
@@ -196,7 +186,7 @@ public:
         // find the first index that has a fitting/bigger size block
         for (int entry = 0; entry < MAX_ORDER+1; entry++) { 
             int curr_entry_size = MIN_BLOCK_SIZE * (2 ** entry);
-            if (memory_array[entry] != NULL && size <= curr_entry_size - sizeof(MemoryList::MallocMetadata)) {
+            if (memory_array[entry] != nullptr && size <= curr_entry_size - sizeof(MemoryList::MallocMetadata)) {
                 return entry;
             }
         }
@@ -308,7 +298,7 @@ void* srealloc(void* oldp, size_t size) {
                 memArray.insert(meta_data, meta_data->size, size);//merge buddy blocks
                 int relevantEntry = memArray.getRelevantEntry(size + sizeof(MemoryList::MallocMetadata));
                 addressAfterMerge = memmove(addressAfterMerge, oldp, meta_data->size);
-                return memArray.memory_list[relevantEntry].remove(addressAfterMerge);
+                return memArray.memory_list[relevantEntry]->remove(addressAfterMerge);
             }
             else {
                 return smalloc(size);
@@ -322,7 +312,7 @@ size_t _num_free_blocks() {
     MemoryArray& memArray = MemoryArray::getInstance();
     int sum_num_free_blocks = 0;
     for (int i = 0; i < MAX_ORDER + 1; i++) {
-        sum_num_free_blocks += memArray.memory_array[i].num_free_blocks;
+        sum_num_free_blocks += memArray.memory_array[i]->num_free_blocks;
     }
     return sum_num_free_blocks;
 }
@@ -331,7 +321,7 @@ size_t _num_free_bytes() {
     MemoryArray& memArray = MemoryArray::getInstance();
     int sum_num_free_bytes = 0;
     for (int i = 0; i < MAX_ORDER + 1; i++) {
-        sum_num_free_bytes += memArray.memory_array[i].num_free_blocks * (MIN_BLOCK_SIZE * (2 ** i));
+        sum_num_free_bytes += memArray.memory_array[i]->num_free_blocks * (MIN_BLOCK_SIZE * (2 ** i));
     }
     return sum_num_free_bytes;
 }
