@@ -46,7 +46,7 @@ public:
                 num_used_blocks++; 
                 num_used_bytes += temp->size; // the size of the block that was allocated
                 num_free_bytes -= temp->size;
-                return temp + sizeof(MemoryList::MallocMetadata);
+                return temp + 1;
             }
             temp = temp->next;
         } // no free blocks in the right size found:
@@ -56,7 +56,7 @@ public:
         newMetadata->is_free = false;
         num_used_blocks++;
         num_used_bytes += newMetadata->size;
-        return newMetadata + sizeof(MemoryList::MallocMetadata);
+        return newMetadata + 1;
     }
 
     //for free usage
@@ -64,8 +64,6 @@ public:
         if(!toRemove || toRemove->is_free)
             return;
     
-        num_used_blocks--;
-        num_used_bytes -= toRemove->size;
         num_free_blocks++;
         num_free_bytes += toRemove->size;
         toRemove->is_free = true;

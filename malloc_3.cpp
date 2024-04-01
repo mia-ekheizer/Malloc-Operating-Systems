@@ -46,7 +46,7 @@ public:
         }
         newMetadata->next = temp;
         num_free_blocks++;
-        return newMetadata + sizeof(MallocMetadata);
+        return newMetadata + 1;
     }
 
     MallocMetadata* remove()
