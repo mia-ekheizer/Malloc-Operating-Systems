@@ -5,12 +5,13 @@
 
 #define MAX_ORDER 10
 #define KB 1024
-#define MAX_BLOCK_SIZE (KB * 128)
+#define MAX_BLOCK_SIZE (128 * KB)
 #define NUM_INITIAL_BLOCKS 32
 #define MIN_BLOCK_SIZE 128
 #define PAGE_SIZE (4 * KB)
 #define MAX_ALLOC_SIZE 100000000
 
+// main structs and variables
 typedef struct MallocMetadata
     {
         size_t size;
@@ -22,7 +23,9 @@ MallocMetadata* memory_array[MAX_ORDER + 1];
 int num_big_blocks = 0;
 int num_big_bytes = 0;
 int offset;
-    
+bool first_smalloc = true;
+
+// list functions    
 void* insertToList(int entry, MallocMetadata *newMetadata)
 {
     if (!memory_array[entry]) { // empty list
@@ -74,7 +77,7 @@ MallocMetadata* removeFromList(int entry)
     
 void removeFromList(int entry, MallocMetadata* address) {
     if (!memory_array[entry]) {
-        return nullptr;
+        return;
     }
     MallocMetadata* temp = memory_array[entry];
     while(temp && temp != address) {
@@ -98,18 +101,33 @@ void removeFromList(int entry, MallocMetadata* address) {
     }
 }
 
+size_t getListSize(int entry) {
+    if (memory_array[entry] == nullptr) {
+        return 0;
+    }
+    size_t size = 0;
+    MallocMetadata* curr = memory_array[entry];
+    while (curr) {
+        size++;
+        curr = curr->next;
+    }
+    return size;
+}
+
+// memory array functions
 void initMemoryArray() {
-    for(int i = 0; i < MAX_ORDER; i++) {
+    for(int i = 0; i <= MAX_ORDER; i++) {
         memory_array[i] = nullptr;
     }
-    void* initialProgramBreak = sbrk(0);
-    void* newAddress = sbrk(MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS);
+    void* programBreak = sbrk(MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS);
+    void* newProgramBreak = sbrk(0);
     // if(newAddress == (void*)(-1)) //TODO: is necessary?
     
-    offset = (reinterpret_cast<intptr_t>(newAddress) - reinterpret_cast<intptr_t>(initialProgramBreak)) % (NUM_INITIAL_BLOCKS * MAX_BLOCK_SIZE);
-    initListInEntry(MAX_ORDER, initialProgramBreak);
-    for (int block_num = 1; block_num <= NUM_INITIAL_BLOCKS; block_num++) {
-        insertToList(MAX_ORDER, (MallocMetadata*)(reinterpret_cast<intptr_t>(newAddress) + (block_num * MAX_BLOCK_SIZE)));
+    offset = (reinterpret_cast<intptr_t>(newProgramBreak) - reinterpret_cast<intptr_t>(programBreak)) % (NUM_INITIAL_BLOCKS * MAX_BLOCK_SIZE);
+    for (int block_num = 0; block_num < NUM_INITIAL_BLOCKS; block_num++) {
+        MallocMetadata* initMetadata = (MallocMetadata*)(programBreak);
+        insertToList(MAX_ORDER, initMetadata);
+        programBreak = (void*)((unsigned long)programBreak + MAX_BLOCK_SIZE);
     }
 }
 
@@ -122,6 +140,19 @@ int getRelevantEntry(size_t size) {
         relevantEntry++;
     }
     return relevantEntry;
+}
+
+int getBiggerThanEqualToEntry(size_t size) {
+    int curr_entry_size;
+    int entry;
+    // find the first index that has a fitting/bigger size block
+    for (entry = 0; entry < MAX_ORDER+1; entry++) { 
+        curr_entry_size = MIN_BLOCK_SIZE * (1 << entry);
+        if (memory_array[entry] != nullptr && size <= curr_entry_size - sizeof(MallocMetadata)) {
+            return entry;
+        }
+    }
+    return entry;
 }
     
 MallocMetadata* isBuddyInEntry(MallocMetadata* newFreeBlock, int entry) {
@@ -138,6 +169,24 @@ MallocMetadata* isBuddyInEntry(MallocMetadata* newFreeBlock, int entry) {
         curr_metadata = curr_metadata->next;
     }
     return nullptr;
+}
+
+MallocMetadata* isMergePossible(MallocMetadata* currMetadata, size_t newSize) {
+    int currSize = currMetadata->size + sizeof(MallocMetadata);
+    MallocMetadata* currAddress = currMetadata;
+    int relevantEntry = getRelevantEntry(currSize + sizeof(MallocMetadata));
+    while (currSize < static_cast<int>(newSize)) {
+        MallocMetadata* buddyAddress = isBuddyInEntry(currAddress, relevantEntry);
+        if (buddyAddress != nullptr && relevantEntry != MAX_ORDER) {
+            currSize *= 2;
+            currAddress = (reinterpret_cast<intptr_t>(currAddress) < reinterpret_cast<intptr_t>(buddyAddress)) ? currAddress : buddyAddress;
+            relevantEntry++;
+        }
+        else {
+            return nullptr;
+        }
+    }
+    return currAddress;
 }
     
 MallocMetadata* removeAndMerge(MallocMetadata* firstBuddyAddress, MallocMetadata* secondBuddyAddress) {
@@ -184,19 +233,7 @@ void* removeFromMemoryArray(size_t size) {
     return (void*)(removeFromList(relevantEntry) + sizeof(MallocMetadata));
 }
 
-int getBiggerThanEqualToEntry(size_t size) {
-    int curr_entry_size;
-    int entry;
-    // find the first index that has a fitting/bigger size block
-    for (entry = 0; entry < MAX_ORDER+1; entry++) { 
-        curr_entry_size = MIN_BLOCK_SIZE * (1 << entry);
-        if (memory_array[entry] != nullptr && size <= curr_entry_size - sizeof(MallocMetadata)) {
-            return entry;
-        }
-    }
-    return entry;
-}
-
+// big allocations
 size_t calcPageAlignment(size_t size) {
     size_t allocation_size = size + sizeof(MallocMetadata);
     if (allocation_size % PAGE_SIZE == 0) {
@@ -224,41 +261,15 @@ void* allocateBigBlocks(size_t size) {
     }
 }
 
-MallocMetadata* isMergePossible(MallocMetadata* currMetadata, size_t newSize) {
-    int currSize = currMetadata->size + sizeof(MallocMetadata);
-    MallocMetadata* currAddress = currMetadata;
-    int relevantEntry = getRelevantEntry(currSize + sizeof(MallocMetadata));
-    while (currSize < static_cast<int>(newSize)) {
-        MallocMetadata* buddyAddress = isBuddyInEntry(currAddress, relevantEntry);
-        if (buddyAddress != nullptr && relevantEntry != MAX_ORDER) {
-            currSize *= 2;
-            currAddress = (reinterpret_cast<intptr_t>(currAddress) < reinterpret_cast<intptr_t>(buddyAddress)) ? currAddress : buddyAddress;
-            relevantEntry++;
-        }
-        else {
-            return nullptr;
-        }
-    }
-    return currAddress;
-}
-
-size_t getListSize(int entry) {
-    if (memory_array[entry] == nullptr) {
-        return 0;
-    }
-    size_t size = 0;
-    MallocMetadata* curr = memory_array[entry];
-    while (curr) {
-        size++;
-        curr = curr->next;
-    }
-    return size;
-}
-
 void* smalloc(size_t size)
 {
     if(size == 0 || size > MAX_ALLOC_SIZE)
         return nullptr;
+
+    if (first_smalloc) {
+        first_smalloc = false;
+        initMemoryArray();
+    }
 
     if (size > MAX_BLOCK_SIZE  - sizeof(MallocMetadata)) {
         return allocateBigBlocks(size);
@@ -354,11 +365,11 @@ size_t _num_free_bytes() {
 }
 
 size_t _num_allocated_blocks() {
-    return memArr.num_big_blocks + _num_free_blocks();
+    return num_big_blocks + _num_free_blocks();
 }
 
 size_t _num_allocated_bytes() {
-    return memArr.num_big_bytes + _num_free_bytes();
+    return num_big_bytes + _num_free_bytes();
 }
 
 size_t _size_meta_data() {
