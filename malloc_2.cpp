@@ -42,9 +42,7 @@ public:
         while(temp->next) {
             if (temp->is_free && temp->size >= newMetadata->size) {
                 temp->is_free = false;
-                num_free_blocks--;
-                num_used_blocks++; 
-                num_used_bytes += temp->size; // the size of the block that was allocated
+                num_free_blocks--; 
                 num_free_bytes -= temp->size;
                 return temp + 1;
             }
@@ -63,7 +61,7 @@ public:
     void remove(MallocMetadata* toRemove) {
         if(!toRemove || toRemove->is_free)
             return;
-    
+
         num_free_blocks++;
         num_free_bytes += toRemove->size;
         toRemove->is_free = true;
@@ -131,24 +129,18 @@ size_t _num_free_bytes() {
 
 size_t _num_allocated_blocks() {
     MemoryList& memList = MemoryList::getInstance();
-    return memList.num_used_blocks + memList.num_free_blocks;
+    return memList.num_used_blocks;
 }
 
 size_t _num_allocated_bytes() {
     MemoryList& memList = MemoryList::getInstance();
-    return memList.num_used_bytes + memList.num_free_bytes;
-}
-
-size_t _num_meta_data_bytes() {
-    return _num_allocated_blocks() * sizeof(MemoryList::MallocMetadata);
+    return memList.num_used_bytes;
 }
 
 size_t _size_meta_data() {
     return sizeof(MemoryList::MallocMetadata);
 }
 
-
-
-
-
-
+size_t _num_meta_data_bytes() {
+    return _num_allocated_blocks() * _size_meta_data();
+}

@@ -336,12 +336,12 @@ size_t _num_free_bytes() {
 
 size_t _num_allocated_blocks() {
     MemoryArray& memArr = MemoryArray::getInstance();
-    return memArr.num_used_blocks + _num_free_blocks();
+    return memArr.num_used_blocks;
 }
 
 size_t _num_allocated_bytes() {
     MemoryArray& memArr = MemoryArray::getInstance();
-    return memArr.num_used_bytes + _num_free_bytes();
+    return memArr.num_used_bytes;
 }
 
 size_t _size_meta_data() {
