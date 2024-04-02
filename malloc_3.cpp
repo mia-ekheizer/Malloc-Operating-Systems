@@ -263,13 +263,13 @@ void* allocateBigBlocks(size_t size) {
 
 void* smalloc(size_t size)
 {
-    if(size == 0 || size > MAX_ALLOC_SIZE)
-        return nullptr;
-
     if (first_smalloc) {
         first_smalloc = false;
         initMemoryArray();
     }
+    
+    if(size == 0 || size > MAX_ALLOC_SIZE)
+        return nullptr;
 
     if (size > MAX_BLOCK_SIZE  - sizeof(MallocMetadata)) {
         return allocateBigBlocks(size);
