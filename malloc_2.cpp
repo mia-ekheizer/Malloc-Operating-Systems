@@ -2,6 +2,8 @@
 #include <string.h>
 #include <cstring>
 
+#define MAX_ALLOC_SIZE 100000000
+
 class MemoryList {
 public:
     typedef struct MallocMetadata {
@@ -74,14 +76,14 @@ public:
 
 void* smalloc(size_t size) {
     MemoryList& memList = MemoryList::getInstance();
-    if(size == 0 || size > 1e8)
+    if(size == 0 || size > MAX_ALLOC_SIZE)
         return nullptr;
 
     return memList.insert(size);
 }
 
 void* scalloc(size_t num, size_t size) {
-    if (num == 0 || size == 0 || size * num > 1e8) 
+    if (num == 0 || size == 0 || size * num > MAX_ALLOC_SIZE) 
         return nullptr;
 
     void* newAddress = smalloc(num * size);
@@ -102,7 +104,7 @@ void sfree(void* p) {
 
 void* srealloc(void* oldp, size_t size) {
     MemoryList& memList = MemoryList::getInstance();
-    if (size == 0 || size > 1e8)
+    if (size == 0 || size > MAX_ALLOC_SIZE)
         return nullptr;
 
     if (oldp == nullptr)
