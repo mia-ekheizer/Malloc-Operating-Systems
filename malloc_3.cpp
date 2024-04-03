@@ -245,7 +245,7 @@ size_t calcPageAlignment(size_t size) {
     }
 }
 
-void* allocateBigBlocks(size_t size) {
+void* allocateBigBlock(size_t size) {
     size_t allocation_size = calcPageAlignment(size);
     void* vm_area_address = mmap(NULL, allocation_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_ANONYMOUS, -1, 0);
     if(vm_area_address == (void*)(-1)) {
@@ -272,7 +272,7 @@ void* smalloc(size_t size)
         return nullptr;
 
     if (size > MAX_BLOCK_SIZE  - sizeof(MallocMetadata)) {
-        return allocateBigBlocks(size);
+        return allocateBigBlock(size);
     }
     return removeFromMemoryArray(size);
 }
@@ -316,7 +316,7 @@ void* srealloc(void* oldp, size_t size) {
         if (size == meta_data->size) 
             return oldp; 
         else {
-            void* newAddress = allocateBigBlocks(size); // returns metadata address
+            void* newAddress = allocateBigBlock(size); // returns metadata address
             newAddress = memmove(newAddress, oldp, meta_data->size);
             munmap(oldp, meta_data->size + sizeof(MallocMetadata));
             num_big_blocks--;
@@ -347,7 +347,6 @@ void* srealloc(void* oldp, size_t size) {
     }
 }
 
-// add the statistics of the mmapped blocks (without munmapped)
 size_t _num_free_blocks() {
     int sum_num_free_blocks = 0;
     for (int i = 0; i <= MAX_ORDER + 1; i++) {
@@ -356,26 +355,26 @@ size_t _num_free_blocks() {
     return sum_num_free_blocks;
 }
 
+size_t _size_meta_data() {
+    return sizeof(MallocMetadata);
+}
+
 size_t _num_free_bytes() {
     int sum_num_free_bytes = 0;
     for (int i = 0; i <= MAX_ORDER + 1; i++) {
-        sum_num_free_bytes += getListSize(i) * (MIN_BLOCK_SIZE * (1 << i));
+        sum_num_free_bytes += getListSize(i) * ((MIN_BLOCK_SIZE * (1 << i)) - _size_meta_data());
     }
     return sum_num_free_bytes;
 }
 
 size_t _num_allocated_blocks() {
-    return num_big_blocks + _num_free_blocks();
-}
-
-size_t _num_allocated_bytes() {
-    return num_big_bytes + _num_free_bytes();
-}
-
-size_t _size_meta_data() {
-    return sizeof(MallocMetadata);
+    return num_big_blocks + NUM_INITIAL_BLOCKS;
 }
 
 size_t _num_meta_data_bytes() { 
     return _num_allocated_blocks() * _size_meta_data();
+}
+
+size_t _num_allocated_bytes() {
+    return num_big_bytes + MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS - _num_meta_data_bytes();
 }
