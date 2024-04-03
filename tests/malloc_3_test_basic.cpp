@@ -391,7 +391,7 @@ TEST_CASE("srealloc merges test", "[malloc3]")
 TEST_CASE("weird values", "[malloc3]")
 {
     // Initial state
-//    verify_block_by_order(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0);
+//  verify_block_by_order(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0);
     void* ptr = smalloc(100000001);
     REQUIRE(ptr==NULL);
     verify_block_by_order(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0);

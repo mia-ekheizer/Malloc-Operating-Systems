@@ -24,6 +24,8 @@ int num_big_blocks = 0;
 int num_big_bytes = 0;
 int offset;
 bool first_smalloc = true;
+int num_used_blocks;
+int num_used_bytes;
 
 // list functions    
 void* insertToList(int entry, MallocMetadata *newMetadata)
@@ -274,6 +276,8 @@ void* smalloc(size_t size)
     if (size > MAX_BLOCK_SIZE  - sizeof(MallocMetadata)) {
         return allocateBigBlock(size);
     }
+    num_used_blocks++;
+    num_used_bytes += size;
     return removeFromMemoryArray(size);
 }
 
@@ -300,6 +304,8 @@ void sfree(void* p) {
         num_big_bytes -= newFreeMemory->size;
     }
     else {
+        num_used_blocks--;
+        num_used_bytes -= newFreeMemory->size;
         insertToMemoryArray(newFreeMemory, newFreeMemory->size, 0);
     }
 }
@@ -313,8 +319,10 @@ void* srealloc(void* oldp, size_t size) {
         return smalloc(size);
 
     if (size > MAX_BLOCK_SIZE - sizeof(MallocMetadata)) {
-        if (size == meta_data->size) 
-            return oldp; 
+        if (size == meta_data->size) {
+            return oldp;
+        } 
+             
         else {
             void* newAddress = allocateBigBlock(size); // returns metadata address
             newAddress = memmove(newAddress, oldp, meta_data->size);
@@ -368,13 +376,24 @@ size_t _num_free_bytes() {
 }
 
 size_t _num_allocated_blocks() {
-    return num_big_blocks + NUM_INITIAL_BLOCKS;
+    if (!first_smalloc) {
+        return num_big_blocks + num_used_blocks + _num_free_blocks();
+    }
+    return num_big_blocks;
 }
 
-size_t _num_meta_data_bytes() { 
+size_t _num_meta_data_bytes() {
     return _num_allocated_blocks() * _size_meta_data();
 }
 
 size_t _num_allocated_bytes() {
-    return num_big_bytes + MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS - _num_meta_data_bytes();
+    if (!first_smalloc) {
+        return num_big_bytes + _num_allocated_blocks() - _num_meta_data_bytes();
+    }
+    else if (num_big_blocks != 0) {
+        return num_big_bytes - _num_meta_data_bytes();
+    }
+    else {
+        return 0;
+    }
 }
