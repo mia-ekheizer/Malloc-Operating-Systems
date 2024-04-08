@@ -22,7 +22,7 @@ typedef struct MallocMetadata
 
 MallocMetadata* memory_array[MAX_ORDER + 1] = {nullptr};
 MallocMetadata* mmap_list = nullptr;
-intptr_t offset;
+unsigned long long offset;
 bool first_smalloc = true;
 
 void initMetaData(MallocMetadata *data, size_t data_size, bool is_free = false) {
@@ -152,15 +152,22 @@ void* mergeBlock(MallocMetadata* metadata, int order) {
         //unsigned long long ptrV = reinterpret_cast<unsigned long long>(metadata);
         unsigned long long fullSize = getFullSize(relevantEntry);
         MallocMetadata* buddyBlock = (MallocMetadata*)((unsigned long long) metadata ^ fullSize);
-        if(!buddyBlock->is_free)
+        MallocMetadata* currNode = memory_array[relevantEntry];
+        while(currNode != nullptr) {
+            if(currNode == buddyBlock)
+                break;
+            currNode = currNode->next;
+        }
+        if(currNode == nullptr || !currNode->is_free) {
             break;
+        }
         removeFromList(&memory_array[relevantEntry], buddyBlock);
         removeFromList(&memory_array[relevantEntry], metadata);
 
         if(metadata > buddyBlock) {
             metadata = buddyBlock;
         }
-        initMetaData(metadata,getDataSize(relevantEntry + 1), true);
+        initMetaData(metadata, getDataSize(relevantEntry + 1), true);
         relevantEntry = getRelevantEntry(metadata->size);
         insertToList(&memory_array[relevantEntry], metadata);
     }
@@ -174,9 +181,9 @@ MallocMetadata* splitBlock(MallocMetadata* metadata, size_t size) {
     if(relevantEntry == 0 || relevantEntry == getRelevantEntry(size))
         return metadata;
 
-    removeFromList(&memory_array[relevantEntry],metadata);
-    unsigned long fullSize = getFullSize(relevantEntry - 1);
-    MallocMetadata* buddyBlock = (MallocMetadata*)((unsigned long)metadata ^ fullSize);
+    removeFromList(&memory_array[relevantEntry], metadata);
+    unsigned long long fullSize = getFullSize(relevantEntry - 1);
+    MallocMetadata* buddyBlock = (MallocMetadata*)((unsigned long long)metadata ^ fullSize);
     
     initMetaData(metadata, getDataSize(relevantEntry - 1), true);
     initMetaData(buddyBlock, getDataSize(relevantEntry - 1), true);
@@ -190,7 +197,17 @@ bool isMergePossible(MallocMetadata* metadata, size_t size) {
     int relevantEntry = getRelevantEntry(metadata->size);
     int finalEntry = getRelevantEntry(size);
     for (int i = relevantEntry; i < finalEntry; i++) {
-        MallocMetadata* buddyBlock = (MallocMetadata*)((intptr_t)metadata ^ getFullSize(i));        
+        MallocMetadata* buddyBlock = (MallocMetadata*)((unsigned long long)metadata ^ getFullSize(i));
+        MallocMetadata* currNode = memory_array[i];
+        while (currNode != nullptr) {
+            if (currNode == buddyBlock && currNode->is_free) {
+                break;
+            }
+            currNode = currNode->next;
+        }
+        if (currNode == nullptr) { 
+            return false;
+        }     
         if (!buddyBlock->is_free) {
             return false;
         }
@@ -235,7 +252,7 @@ void* smalloc(size_t size)
         void* startOfProgram = sbrk(0);
         if(startOfProgram == (void*)(-1)) 
             return nullptr;
-        offset = (intptr_t) (MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS - ((unsigned long long)startOfProgram % (MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS)));
+        offset = (unsigned long long) (MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS - ((unsigned long long)startOfProgram % (MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS)));
         if(sbrk(MAX_BLOCK_SIZE * NUM_INITIAL_BLOCKS + offset) == (void*)(-1))
             return nullptr;
         //we will add the offset, do xor and then subtract the offset
@@ -312,50 +329,50 @@ void* srealloc(void* oldp, size_t size) {
 
     if (oldp == nullptr)
         return smalloc(size);
-
+    size_t old_size = ((MallocMetadata*)((unsigned long long)oldp - sizeof(MallocMetadata)))->size;
     MallocMetadata* metadata = mmap_list;
+    while(metadata != nullptr) {
+        if((void*)((unsigned long long)metadata + sizeof(MallocMetadata)) == oldp){
+            if(size <= metadata->size)
+                return oldp;
+            void* res = smalloc(size);
+            if(res == nullptr)
+                return nullptr;
+            //size_t alignment = calcPageAlignment(metadata->size);
+            memmove(res, oldp, metadata->size); //  + alignment + sizeof(MallocMetadata)
+            sfree(oldp);
+            return res;
+        }
+        metadata = metadata->next;
+    }
+    for(int i = 0; i < MAX_ORDER + 1; i++) {
+        metadata = memory_array[i];
         while(metadata != nullptr) {
-            if((void*)((unsigned long long)metadata + sizeof(MallocMetadata)) == oldp){
-                if(size <= metadata->size)
+            if((void*) ((unsigned long long)metadata + sizeof(MallocMetadata)) == oldp) {
+                if(size <= metadata->size) {
                     return oldp;
-                void* res = smalloc(size);
-                if(res == nullptr)
-                    return nullptr;
-                //size_t alignment = calcPageAlignment(metadata->size);
-                memmove(res, oldp, metadata->size ); //  + alignment + sizeof(MallocMetadata)
-                sfree(oldp);
-                return res;
+                }
+                if(isMergePossible(metadata,size)) {
+                    unsigned long long baseSize = metadata->size;
+                    metadata->is_free = true;
+                    metadata = (MallocMetadata*) mergeBlock(metadata,getRelevantEntry(size));
+                    metadata->is_free = false;
+                    void* res = (void*)((unsigned long long)metadata + sizeof(MallocMetadata));
+                    if(res != oldp) {
+                        memmove(res, oldp, baseSize);
+                        sfree(oldp);
+                    }
+                    return res;
+                }
             }
             metadata = metadata->next;
         }
-        for(int i = 0; i < MAX_ORDER + 1; i++) {
-            metadata = memory_array[i];
-            while(metadata != nullptr) {
-                if((void*) ((unsigned long long)metadata + sizeof(MallocMetadata)) == oldp) {
-                    if(size <= metadata->size) {
-                        return oldp;
-                    }
-                    if(isMergePossible(metadata,size)) {
-                        unsigned long long baseSize = metadata->size;
-                        metadata->is_free = true;
-                        metadata = (MallocMetadata*) mergeBlock(metadata,getRelevantEntry(size));
-                        metadata->is_free = false;
-                        void* res = (void*)((unsigned long long)metadata + sizeof(MallocMetadata));
-                        if(res != oldp) {
-                            memmove(res, oldp, baseSize);
-                            sfree(oldp);
-                        }
-                        return res;
-                    }
-                }
-                metadata = metadata->next;
-            }
-        }
+    }
     void* res = smalloc(size);
     if(res == nullptr) {
         return nullptr;
     }
-    memmove(res, oldp, metadata->size);//TODO:
+    memmove(res, oldp, old_size);
     sfree(oldp);
     return res;
 }
